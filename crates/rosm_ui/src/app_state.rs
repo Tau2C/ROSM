@@ -39,6 +39,7 @@ pub struct AppState {
     pub is_panning: bool,
     pub last_mouse_pos: Option<(f32, f32)>,
     pub dragged_node: Option<NodeId>,
+    pub dragged_node_initial_pos: Option<LatLon>,
     pub file_path: Option<PathBuf>,
     pub validation_issues: Vec<ValidationIssue>,
     pub status_message: String,
@@ -60,6 +61,7 @@ impl Default for AppState {
             is_panning: false,
             last_mouse_pos: None,
             dragged_node: None,
+            dragged_node_initial_pos: None,
             file_path: None,
             validation_issues: Vec::new(),
             status_message: "Ready".to_string(),
@@ -300,13 +302,28 @@ impl AppState {
                 ToolMode::Select => {
                     // Check if clicked an existing node
                     if let Some((nid, _dist)) = self.find_node_near(x, y, 10.0) {
+                        let is_already_selected =
+                            self.selected_primitive == Some(PrimitiveId::Node(nid));
                         self.selected_primitive = Some(PrimitiveId::Node(nid));
-                        self.dragged_node = Some(nid);
+
+                        // To move a node it needs to be selected first. Block moving when selecting.
+                        if is_already_selected {
+                            self.dragged_node = Some(nid);
+                            self.dragged_node_initial_pos =
+                                self.dataset.get_node(nid).map(|n| n.position);
+                        } else {
+                            self.dragged_node = None;
+                            self.dragged_node_initial_pos = None;
+                        }
                     } else if let Some(wid) = self.find_way_near(x, y, 8.0) {
                         self.selected_primitive = Some(PrimitiveId::Way(wid));
+                        self.dragged_node = None;
+                        self.dragged_node_initial_pos = None;
                     } else {
                         // Clicked empty canvas: start panning or clear selection
                         self.selected_primitive = None;
+                        self.dragged_node = None;
+                        self.dragged_node_initial_pos = None;
                         self.is_panning = true;
                     }
                 }
@@ -356,9 +373,29 @@ impl AppState {
         self.current_mouse_pos = Some((x, y));
 
         if let Some(dragged_id) = self.dragged_node.take() {
+            let initial_pos = self.dragged_node_initial_pos.take();
             let final_pos = self.viewport.screen_to_latlon(x, y);
-            let cmd = Box::new(MoveNodeCommand::new(dragged_id, final_pos));
-            let _ = self.command_stack.execute(cmd, &mut self.dataset);
+
+            let moved = initial_pos
+                .map(|p| {
+                    (p.lat() - final_pos.lat()).abs() > 1e-7
+                        || (p.lon() - final_pos.lon()).abs() > 1e-7
+                })
+                .unwrap_or(true);
+
+            if moved {
+                // Restore node position to initial_pos prior to executing MoveNodeCommand
+                // so that MoveNodeCommand accurately records the old position for undo
+                if let (Some(init), Some(node)) =
+                    (initial_pos, self.dataset.get_node_mut(dragged_id))
+                {
+                    node.position = init;
+                }
+                let cmd = Box::new(MoveNodeCommand::new(dragged_id, final_pos));
+                let _ = self.command_stack.execute(cmd, &mut self.dataset);
+            }
+        } else {
+            self.dragged_node_initial_pos = None;
         }
 
         self.last_mouse_pos = None;
@@ -745,5 +782,86 @@ mod tests {
         // Remove custom source
         assert!(state.remove_custom_source("custom_ortho"));
         assert!(state.tile_manager.registry().get("custom_ortho").is_none());
+    }
+
+    #[test]
+    fn test_node_cannot_be_moved_on_initial_selection() {
+        let mut state = AppState::new();
+        state.viewport.resize(800, 600);
+        state.viewport.center_lat = 51.5074;
+        state.viewport.center_lon = -0.1278;
+
+        // Insert a test node
+        let test_nid = state.dataset.allocate_node_id();
+        let initial_pos = LatLon::new(51.5074, -0.1278);
+        state.dataset.insert_node(Node::new(test_nid, initial_pos));
+
+        let (sx, sy) = state.viewport.latlon_to_screen(initial_pos);
+
+        // 1. First click: node is NOT selected yet
+        state.selected_primitive = None;
+        state.on_mouse_down(sx, sy, MouseButton::Left);
+
+        // It should now be selected, but dragging MUST be blocked
+        assert_eq!(state.selected_primitive, Some(PrimitiveId::Node(test_nid)));
+        assert_eq!(state.dragged_node, None);
+        assert_eq!(state.dragged_node_initial_pos, None);
+
+        // Attempting to move the mouse during selection must NOT move the node
+        state.on_mouse_move(sx + 80.0, sy + 80.0);
+        assert_eq!(
+            state.dataset.get_node(test_nid).unwrap().position,
+            initial_pos
+        );
+
+        // Mouse up finishes the selection without any move command
+        state.on_mouse_up(sx + 80.0, sy + 80.0, MouseButton::Left);
+        assert_eq!(
+            state.dataset.get_node(test_nid).unwrap().position,
+            initial_pos
+        );
+        assert!(!state.command_stack.can_undo());
+    }
+
+    #[test]
+    fn test_already_selected_node_can_be_moved_and_undone() {
+        let mut state = AppState::new();
+        state.viewport.resize(800, 600);
+        state.viewport.center_lat = 51.5074;
+        state.viewport.center_lon = -0.1278;
+
+        // Insert a test node
+        let test_nid = state.dataset.allocate_node_id();
+        let initial_pos = LatLon::new(51.5074, -0.1278);
+        state.dataset.insert_node(Node::new(test_nid, initial_pos));
+
+        let (sx, sy) = state.viewport.latlon_to_screen(initial_pos);
+
+        // Pre-select the node
+        state.selected_primitive = Some(PrimitiveId::Node(test_nid));
+
+        // 2. Mouse down on already selected node allows dragging
+        state.on_mouse_down(sx, sy, MouseButton::Left);
+        assert_eq!(state.dragged_node, Some(test_nid));
+        assert_eq!(state.dragged_node_initial_pos, Some(initial_pos));
+
+        // Move to new position
+        let new_sx = sx + 50.0;
+        let new_sy = sy + 50.0;
+        let target_geo = state.viewport.screen_to_latlon(new_sx, new_sy);
+        state.on_mouse_move(new_sx, new_sy);
+
+        // Mouse up commits the move command
+        state.on_mouse_up(new_sx, new_sy, MouseButton::Left);
+
+        let moved_pos = state.dataset.get_node(test_nid).unwrap().position;
+        assert!((moved_pos.lat() - target_geo.lat()).abs() < 1e-5);
+        assert!((moved_pos.lon() - target_geo.lon()).abs() < 1e-5);
+        assert!(state.command_stack.can_undo());
+
+        // Undo successfully restores the original position
+        assert!(state.undo().is_ok());
+        let reverted_pos = state.dataset.get_node(test_nid).unwrap().position;
+        assert_eq!(reverted_pos, initial_pos);
     }
 }
