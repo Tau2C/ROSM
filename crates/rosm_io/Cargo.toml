@@ -1,0 +1,13 @@
+[package]
+name = "rosm_io"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rosm_core = { path = "../rosm_core" }
+quick-xml = { workspace = true }
+thiserror.workspace = true
+
+[dev-dependencies]
