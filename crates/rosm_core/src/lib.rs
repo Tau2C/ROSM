@@ -10,9 +10,9 @@ pub mod validator;
 
 // Convenient re-exports
 pub use command::{
-    AddPrimitiveCommand, ChangeTagsCommand, CombineWaysCommand, Command, CommandError, CommandStack,
-    DeletePrimitiveCommand, MergeNodesCommand, ModifyWayNodesCommand, MoveNodeCommand,
-    ReverseWayCommand, SequenceCommand, SplitWayCommand,
+    AddPrimitiveCommand, ChangeTagsCommand, CombineWaysCommand, Command, CommandError,
+    CommandStack, DeletePrimitiveCommand, MergeNodesCommand, ModifyWayNodesCommand,
+    MoveNodeCommand, ReverseWayCommand, SequenceCommand, SplitWayCommand,
 };
 pub use dataset::DataSet;
 pub use geo::{BoundingBox, LatLon};

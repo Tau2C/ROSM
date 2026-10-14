@@ -1,9 +1,9 @@
-use std::io::Cursor;
 use rosm_core::geo::LatLon;
 use rosm_core::id::{NodeId, PrimitiveId, RelationId, WayId};
 use rosm_core::primitive::{Node, Relation, RelationMember, Way};
 use rosm_core::DataSet;
 use rosm_io::{read_osm_xml, write_osm_xml};
+use std::io::Cursor;
 
 #[test]
 fn test_unicode_and_special_characters_in_tags() {
@@ -12,7 +12,8 @@ fn test_unicode_and_special_characters_in_tags() {
     let mut n = Node::new(NodeId(1), LatLon::new(51.7687, 19.4570));
     n.tags.insert("name", "Łódź Fabryczna & Główna <Station>");
     n.tags.insert("name:ja", "ウッチ・ファブリチナ駅");
-    n.tags.insert("description", "Quotes \"test\" and 'single' & ampersand");
+    n.tags
+        .insert("description", "Quotes \"test\" and 'single' & ampersand");
     ds.insert_node(n);
 
     let mut out = Vec::new();

@@ -300,7 +300,10 @@ mod tests {
         assert!(way.is_area());
 
         way.reverse();
-        assert_eq!(way.nodes, vec![NodeId(10), NodeId(12), NodeId(11), NodeId(10)]);
+        assert_eq!(
+            way.nodes,
+            vec![NodeId(10), NodeId(12), NodeId(11), NodeId(10)]
+        );
     }
 
     #[test]
