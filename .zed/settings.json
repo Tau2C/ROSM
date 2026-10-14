@@ -1,0 +1,17 @@
+{
+  "load_direnv": "direct",
+  "languages": {
+    "Rust": {
+      "initialization_options": {
+        "cargo": {
+          "buildScripts": {
+            "enable": true
+          }
+        },
+        "procMacro": {
+          "enable": true
+        }
+      }
+    }
+  }
+}

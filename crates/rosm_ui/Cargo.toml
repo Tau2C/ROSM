@@ -1,0 +1,18 @@
+[package]
+name = "rosm_ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rosm"
+path = "src/main.rs"
+
+[dependencies]
+rosm_core = { path = "../rosm_core" }
+rosm_io = { path = "../rosm_io" }
+slint = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }
