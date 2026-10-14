@@ -459,10 +459,18 @@ impl Command for CombineWaysCommand {
             .ok_or(CommandError::WayNotFound(self.removed_way_id))?
             .clone();
 
-        let w1_first = way1.first_node().ok_or_else(|| CommandError::InvalidOperation("way1 is empty".into()))?;
-        let w1_last = way1.last_node().ok_or_else(|| CommandError::InvalidOperation("way1 is empty".into()))?;
-        let w2_first = way2.first_node().ok_or_else(|| CommandError::InvalidOperation("way2 is empty".into()))?;
-        let w2_last = way2.last_node().ok_or_else(|| CommandError::InvalidOperation("way2 is empty".into()))?;
+        let w1_first = way1
+            .first_node()
+            .ok_or_else(|| CommandError::InvalidOperation("way1 is empty".into()))?;
+        let w1_last = way1
+            .last_node()
+            .ok_or_else(|| CommandError::InvalidOperation("way1 is empty".into()))?;
+        let w2_first = way2
+            .first_node()
+            .ok_or_else(|| CommandError::InvalidOperation("way2 is empty".into()))?;
+        let w2_last = way2
+            .last_node()
+            .ok_or_else(|| CommandError::InvalidOperation("way2 is empty".into()))?;
 
         let mut combined_nodes: Vec<NodeId>;
 
@@ -563,7 +571,9 @@ impl MergeNodesCommand {
 impl Command for MergeNodesCommand {
     fn execute(&mut self, dataset: &mut DataSet) -> Result<(), CommandError> {
         if self.target_node_id == self.absorbed_node_id {
-            return Err(CommandError::InvalidOperation("Cannot merge node with itself".into()));
+            return Err(CommandError::InvalidOperation(
+                "Cannot merge node with itself".into(),
+            ));
         }
 
         let absorbed = dataset
@@ -602,7 +612,13 @@ impl Command for MergeNodesCommand {
             self.affected_ways.push((wid, orig_nodes.clone()));
             let new_nodes: Vec<NodeId> = orig_nodes
                 .into_iter()
-                .map(|nid| if nid == self.absorbed_node_id { self.target_node_id } else { nid })
+                .map(|nid| {
+                    if nid == self.absorbed_node_id {
+                        self.target_node_id
+                    } else {
+                        nid
+                    }
+                })
                 .collect();
             let mut way = dataset.get_way(wid).unwrap().clone();
             way.nodes = new_nodes;

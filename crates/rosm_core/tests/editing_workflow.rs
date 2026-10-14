@@ -26,10 +26,7 @@ fn test_full_josm_editing_scenario() {
         ))));
     }
 
-    let mut way = Way::new(
-        WayId(101),
-        vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4)],
-    );
+    let mut way = Way::new(WayId(101), vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4)]);
     way.tags.insert("highway", "secondary");
     way.tags.insert("name", "Baker Street");
     batch.push(Box::new(AddPrimitiveCommand::new(OsmPrimitive::Way(way))));
@@ -38,7 +35,10 @@ fn test_full_josm_editing_scenario() {
 
     assert_eq!(ds.node_count(), 4);
     assert_eq!(ds.way_count(), 1);
-    assert!(validate(&ds).is_empty(), "clean road should pass validation");
+    assert!(
+        validate(&ds).is_empty(),
+        "clean road should pass validation"
+    );
 
     // 2. Add a building next to the road
     let b_nodes = [
