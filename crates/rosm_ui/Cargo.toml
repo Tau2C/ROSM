@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 rosm_core = { path = "../rosm_core" }
 rosm_io = { path = "../rosm_io" }
+rosm_imagery = { path = "../rosm_imagery" }
+image = { workspace = true }
 slint = { workspace = true }
 
 [build-dependencies]

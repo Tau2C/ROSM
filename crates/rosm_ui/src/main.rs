@@ -34,7 +34,7 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // Refresh UI with initial dataset
-    update_ui(&ui, &state.borrow());
+    update_ui(&ui, &mut state.borrow_mut());
 
     // --- Pointer / Canvas events ---
 
@@ -46,7 +46,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let mut s = state.borrow_mut();
                 s.viewport.resize(w as u32, h as u32);
                 if let Some(ui) = ui_weak.upgrade() {
-                    update_ui(&ui, &s);
+                    update_ui(&ui, &mut s);
                 }
             }
         });
@@ -71,7 +71,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             s.on_mouse_down(x, y, button);
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -95,7 +95,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             s.on_mouse_up(x, y, button);
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -114,7 +114,7 @@ fn main() -> Result<(), slint::PlatformError> {
             s.on_mouse_move(x, y);
             if let Some(ui) = ui_weak.upgrade() {
                 if s.is_panning || s.dragged_node.is_some() || !s.drawing_nodes.is_empty() {
-                    update_ui(&ui, &s);
+                    update_ui(&ui, &mut s);
                 } else if let Some(geo) = s.mouse_geo {
                     ui.set_cursor_coords(
                         format!("Lat: {:.6}°, Lon: {:.6}°", geo.lat(), geo.lon()).into(),
@@ -137,7 +137,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             s.on_scroll(x, y, delta_y);
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -155,7 +155,7 @@ fn main() -> Result<(), slint::PlatformError> {
             );
             s.viewport.zoom_at(1.3, cx, cy);
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -171,7 +171,7 @@ fn main() -> Result<(), slint::PlatformError> {
             );
             s.viewport.zoom_at(1.0 / 1.3, cx, cy);
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -183,7 +183,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.fit_extent();
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -198,7 +198,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Err(e) => s.status_message = e,
             }
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -213,7 +213,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Err(e) => s.status_message = e,
             }
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -228,7 +228,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 _ => ToolMode::Select,
             };
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -240,7 +240,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.finish_drawing();
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -252,7 +252,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.cancel_drawing();
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -264,7 +264,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.delete_selected();
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -276,7 +276,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.split_selected_way();
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -288,7 +288,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.reverse_selected_way();
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -301,7 +301,7 @@ fn main() -> Result<(), slint::PlatformError> {
             s.run_validator();
             s.status_message = format!("Validation found {} issues", s.validation_issues.len());
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -318,7 +318,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 s.load_sample_map();
             }
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -333,7 +333,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 s.status_message = format!("Save failed: {e}");
             }
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -345,7 +345,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.add_or_update_tag(key.as_str(), value.as_str());
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -357,7 +357,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut s = state.borrow_mut();
             s.remove_tag(key.as_str());
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -384,7 +384,45 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             }
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    // --- Imagery Callbacks ---
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_set_imagery_source(move |src_id| {
+            let mut s = state.borrow_mut();
+            s.set_imagery_source(src_id.as_str());
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_set_imagery_opacity(move |opacity| {
+            let mut s = state.borrow_mut();
+            s.set_imagery_opacity(opacity);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_toggle_imagery(move || {
+            let mut s = state.borrow_mut();
+            s.toggle_imagery();
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
             }
         });
     }
@@ -402,16 +440,37 @@ fn main() -> Result<(), slint::PlatformError> {
                     s.viewport.resize(actual_w as u32, actual_h as u32);
                     s.fit_extent();
                 }
-                update_ui(&ui, &s);
+                update_ui(&ui, &mut s);
             }
         });
     }
+
+    // Periodic timer to poll background downloaded tiles
+    let tile_timer = slint::Timer::default();
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        tile_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(60),
+            move || {
+                let mut s = state.borrow_mut();
+                let count = s.tile_manager.update();
+                if count > 0 {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        update_ui(&ui, &mut s);
+                    }
+                }
+            },
+        );
+    }
+    let _keep_timer = tile_timer;
 
     ui.run()
 }
 
 /// Updates Slint UI properties from the current AppState.
-fn update_ui(ui: &MainWindow, state: &AppState) {
+fn update_ui(ui: &MainWindow, state: &mut AppState) {
     let mut vp = state.viewport.clone();
     let actual_w = ui.get_canvas_actual_width();
     let actual_h = ui.get_canvas_actual_height();
@@ -426,10 +485,17 @@ fn update_ui(ui: &MainWindow, state: &AppState) {
         state.selected_primitive,
         &state.drawing_nodes,
         state.mouse_geo,
+        Some(&mut state.tile_manager),
     );
     ui.set_map_image(Image::from_rgba8(buffer));
 
-    // 2. Toolbar & Status
+    // 2. Imagery Properties
+    ui.set_imagery_enabled(state.tile_manager.is_enabled());
+    ui.set_imagery_opacity(state.tile_manager.opacity());
+    let src_name = state.tile_manager.source().map(|s| s.name).unwrap_or("Off");
+    ui.set_imagery_source_name(src_name.into());
+
+    // 3. Toolbar & Status
     ui.set_active_tool(match state.active_tool {
         ToolMode::Select => 0,
         ToolMode::DrawWay => 1,

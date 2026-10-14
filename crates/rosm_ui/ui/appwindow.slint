@@ -44,6 +44,10 @@ export component MainWindow inherits Window {
     callback remove_tag(string);
     callback select_issue(int);
 
+    callback set_imagery_source(string);
+    callback set_imagery_opacity(float);
+    callback toggle_imagery();
+
     // Properties populated from Rust
     in-out property <image> map_image;
     in-out property <int> active_tool: 0; // 0 = Select, 1 = DrawWay
@@ -51,6 +55,10 @@ export component MainWindow inherits Window {
     in-out property <bool> can_undo: false;
     in-out property <bool> can_redo: false;
     in-out property <bool> is_dirty: false;
+
+    in-out property <bool> imagery_enabled: true;
+    in-out property <string> imagery_source_name: "OpenStreetMap Standard";
+    in-out property <float> imagery_opacity: 1.0;
 
     in-out property <bool> has_selection: false;
     in-out property <string> selection_title: "No Selection";
@@ -189,6 +197,14 @@ export component MainWindow inherits Window {
                     text: "Validate" + (root.issue_count > 0 ? (" (" + root.issue_count + ")") : "");
                     clicked => { root.action_validate(); }
                 }
+
+                Rectangle { width: 1px; background: #333846; }
+
+                // Imagery Layer Quick Toggle
+                Button {
+                    text: root.imagery_enabled ? ("Imagery: " + root.imagery_source_name) : "Imagery: Off";
+                    clicked => { root.toggle_imagery(); }
+                }
             }
         }
 
@@ -274,6 +290,69 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     padding: 12px;
                     spacing: 12px;
+
+                    // Imagery Layer Panel (JOSM style)
+                    VerticalLayout {
+                        spacing: 6px;
+                        HorizontalLayout {
+                            Text {
+                                text: "Imagery Layer";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: #f1f5f9;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button {
+                                text: root.imagery_enabled ? "Visible" : "Hidden";
+                                clicked => { root.toggle_imagery(); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 4px;
+                            Button {
+                                text: "OSM";
+                                clicked => { root.set_imagery_source("osm_carto"); }
+                            }
+                            Button {
+                                text: "Aerial";
+                                clicked => { root.set_imagery_source("esri_world_imagery"); }
+                            }
+                            Button {
+                                text: "Topo";
+                                clicked => { root.set_imagery_source("opentopomap"); }
+                            }
+                            Button {
+                                text: "HOT";
+                                clicked => { root.set_imagery_source("hot_osm"); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: "Opacity:";
+                                font-size: 11px;
+                                color: #94a3b8;
+                                vertical-alignment: center;
+                            }
+                            Button {
+                                text: "30%";
+                                clicked => { root.set_imagery_opacity(0.3); }
+                            }
+                            Button {
+                                text: "60%";
+                                clicked => { root.set_imagery_opacity(0.6); }
+                            }
+                            Button {
+                                text: "100%";
+                                clicked => { root.set_imagery_opacity(1.0); }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: #2e323e; }
 
                     // Inspector Header
                     VerticalLayout {

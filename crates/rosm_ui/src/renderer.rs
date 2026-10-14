@@ -30,6 +30,7 @@ pub fn render_map(
     selected_primitive: Option<PrimitiveId>,
     drawing_nodes: &[NodeId],
     mouse_geo: Option<LatLon>,
+    mut tile_manager: Option<&mut rosm_imagery::TileManager>,
 ) -> SharedPixelBuffer<Rgba8Pixel> {
     let w = viewport.width;
     let h = viewport.height;
@@ -41,7 +42,16 @@ pub fn render_map(
         chunk.copy_from_slice(&colors::BG);
     }
 
-    // 2. Render subtle geographic grid
+    // 2. Render slippy map raster tiles if enabled
+    if let Some(ref mut mgr) = tile_manager {
+        if mgr.is_enabled() {
+            if let Some(source) = mgr.source().cloned() {
+                render_imagery_tiles(bytes, w, h, viewport, mgr, &source);
+            }
+        }
+    }
+
+    // 3. Render subtle geographic grid
     render_grid(bytes, w, h, viewport);
 
     // 3. Render all ways
@@ -368,5 +378,196 @@ fn draw_dashed_line(
             err += dx;
             y0 += sy;
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ScreenRect {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+fn render_imagery_tiles(
+    bytes: &mut [u8],
+    w: u32,
+    h: u32,
+    vp: &Viewport,
+    mgr: &mut rosm_imagery::TileManager,
+    source: &rosm_imagery::ImagerySource,
+) {
+    let zoom = rosm_imagery::zoom_level_from_pixels_per_deg(vp.zoom)
+        .clamp(source.min_zoom, source.max_zoom);
+
+    let bbox = vp.visible_bbox();
+    let tiles = rosm_imagery::TileCoordinate::tiles_in_bbox(&bbox, zoom);
+
+    // Limit visible tiles to at most 64 to maintain high FPS when zoomed out
+    let tiles_to_render = if tiles.len() > 64 {
+        &tiles[..64]
+    } else {
+        &tiles[..]
+    };
+
+    let opacity = mgr.opacity();
+
+    for &tile in tiles_to_render {
+        let bounds = tile.bounds();
+        let nw = LatLon::new(bounds.max_lat, bounds.min_lon);
+        let se = LatLon::new(bounds.min_lat, bounds.max_lon);
+
+        let (x0, y0) = vp.latlon_to_screen(nw);
+        let (x1, y1) = vp.latlon_to_screen(se);
+
+        let rect = ScreenRect { x0, y0, x1, y1 };
+        if let Some(resolved) = mgr.get_tile_or_ancestor(source, tile) {
+            blit_tile(bytes, w, h, &resolved, tile, rect, opacity);
+        } else if mgr.is_pending(source.id, tile) {
+            draw_tile_placeholder(bytes, w, h, rect);
+        }
+    }
+}
+
+fn blit_tile(
+    dest: &mut [u8],
+    w: u32,
+    h: u32,
+    resolved: &rosm_imagery::ResolvedTile,
+    requested_coord: rosm_imagery::TileCoordinate,
+    rect: ScreenRect,
+    opacity: f32,
+) {
+    let (x0, y0, x1, y1) = (rect.x0, rect.y0, rect.x1, rect.y1);
+    let img = &resolved.image;
+    let (img_w, img_h) = (img.width(), img.height());
+    if img_w == 0 || img_h == 0 {
+        return;
+    }
+
+    let (src_x0, src_y0, src_x1, src_y1) = if resolved.is_exact {
+        (0.0_f32, 0.0_f32, img_w as f32, img_h as f32)
+    } else {
+        let dz = requested_coord.z.saturating_sub(resolved.actual_coord.z);
+        let scale = (1u32 << dz) as f32;
+        let dx = (requested_coord.x - (resolved.actual_coord.x << dz)) as f32;
+        let dy = (requested_coord.y - (resolved.actual_coord.y << dz)) as f32;
+        let u0 = (dx / scale) * img_w as f32;
+        let u1 = ((dx + 1.0) / scale) * img_w as f32;
+        let v0 = (dy / scale) * img_h as f32;
+        let v1 = ((dy + 1.0) / scale) * img_h as f32;
+        (u0, v0, u1, v1)
+    };
+
+    let dx_span = x1 - x0;
+    let dy_span = y1 - y0;
+    if dx_span.abs() < 0.5 || dy_span.abs() < 0.5 {
+        return;
+    }
+
+    let min_x = (x0.round() as i32).max(0).min(w as i32);
+    let max_x = (x1.round() as i32).max(0).min(w as i32);
+    let min_y = (y0.round() as i32).max(0).min(h as i32);
+    let max_y = (y1.round() as i32).max(0).min(h as i32);
+
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+
+    let src_w = src_x1 - src_x0;
+    let src_h = src_y1 - src_y0;
+
+    let alpha_int = (opacity.clamp(0.0, 1.0) * 255.0) as u32;
+
+    for sy in min_y..max_y {
+        let v = (sy as f32 - y0) / dy_span;
+        let src_y = ((src_y0 + v * src_h) as u32).min(img_h - 1);
+        let row_offset = (sy as usize * w as usize) * 4;
+
+        for sx in min_x..max_x {
+            let u = (sx as f32 - x0) / dx_span;
+            let src_x = ((src_x0 + u * src_w) as u32).min(img_w - 1);
+
+            let pixel = img.get_pixel(src_x, src_y);
+            let pixel_alpha = (pixel[3] as u32 * alpha_int) / 255;
+            let pixel_inv_alpha = 255 - pixel_alpha;
+
+            let idx = row_offset + sx as usize * 4;
+            if pixel_alpha == 255 {
+                dest[idx] = pixel[0];
+                dest[idx + 1] = pixel[1];
+                dest[idx + 2] = pixel[2];
+                dest[idx + 3] = 255;
+            } else if pixel_alpha > 0 {
+                dest[idx] = (((pixel[0] as u32 * pixel_alpha)
+                    + (dest[idx] as u32 * pixel_inv_alpha))
+                    / 255) as u8;
+                dest[idx + 1] = (((pixel[1] as u32 * pixel_alpha)
+                    + (dest[idx + 1] as u32 * pixel_inv_alpha))
+                    / 255) as u8;
+                dest[idx + 2] = (((pixel[2] as u32 * pixel_alpha)
+                    + (dest[idx + 2] as u32 * pixel_inv_alpha))
+                    / 255) as u8;
+                dest[idx + 3] = 255;
+            }
+        }
+    }
+}
+
+fn draw_tile_placeholder(dest: &mut [u8], w: u32, h: u32, rect: ScreenRect) {
+    let (x0, y0, x1, y1) = (rect.x0, rect.y0, rect.x1, rect.y1);
+    let min_x = (x0.round() as i32).max(0).min(w as i32 - 1);
+    let max_x = (x1.round() as i32).max(0).min(w as i32 - 1);
+    let min_y = (y0.round() as i32).max(0).min(h as i32 - 1);
+    let max_y = (y1.round() as i32).max(0).min(h as i32 - 1);
+
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+
+    let color = [38, 42, 52, 255];
+    for x in min_x..=max_x {
+        let idx_top = (min_y as usize * w as usize + x as usize) * 4;
+        let idx_bot = (max_y as usize * w as usize + x as usize) * 4;
+        dest[idx_top..idx_top + 4].copy_from_slice(&color);
+        dest[idx_bot..idx_bot + 4].copy_from_slice(&color);
+    }
+    for y in min_y..=max_y {
+        let idx_left = (y as usize * w as usize + min_x as usize) * 4;
+        let idx_right = (y as usize * w as usize + max_x as usize) * 4;
+        dest[idx_left..idx_left + 4].copy_from_slice(&color);
+        dest[idx_right..idx_right + 4].copy_from_slice(&color);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::RgbaImage;
+    use rosm_core::primitive::Node;
+    use rosm_imagery::{TileCache, TileCoordinate, TileManager, OSM_CARTO};
+
+    #[test]
+    fn test_render_map_with_imagery() {
+        let mut ds = DataSet::new();
+        ds.insert_node(Node::new(1, LatLon::new(51.5074, -0.1278)));
+
+        let vp = Viewport::new(400, 300);
+        let cache = TileCache::new(None, 10);
+
+        // Prepopulate cache with a mock tile
+        let center_tile = TileCoordinate::from_latlon(LatLon::new(51.5074, -0.1278), 16);
+        let mut test_img = RgbaImage::new(256, 256);
+        for p in test_img.pixels_mut() {
+            *p = image::Rgba([100, 150, 200, 255]);
+        }
+        cache.insert(OSM_CARTO.id, center_tile, &[], test_img);
+
+        let mut mgr = TileManager::new(cache);
+        mgr.set_opacity(0.8);
+
+        let buffer = render_map(&ds, &vp, None, &[], None, Some(&mut mgr));
+        assert_eq!(buffer.width(), 400);
+        assert_eq!(buffer.height(), 300);
     }
 }

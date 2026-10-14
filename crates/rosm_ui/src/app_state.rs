@@ -42,6 +42,7 @@ pub struct AppState {
     pub file_path: Option<PathBuf>,
     pub validation_issues: Vec<ValidationIssue>,
     pub status_message: String,
+    pub tile_manager: rosm_imagery::TileManager,
 }
 
 impl Default for AppState {
@@ -60,6 +61,7 @@ impl Default for AppState {
             file_path: None,
             validation_issues: Vec::new(),
             status_message: "Ready".to_string(),
+            tile_manager: rosm_imagery::TileManager::with_default_cache(),
         };
 
         state.load_sample_map();
@@ -433,6 +435,56 @@ impl AppState {
         }
 
         best.map(|(wid, _)| wid)
+    }
+
+    pub fn set_imagery_source(&mut self, source_id: &str) {
+        match source_id {
+            "osm_carto" => {
+                self.tile_manager.set_source(Some(rosm_imagery::OSM_CARTO));
+                self.tile_manager.set_enabled(true);
+                self.status_message = "Imagery: OpenStreetMap Standard".to_string();
+            }
+            "esri_world_imagery" => {
+                self.tile_manager
+                    .set_source(Some(rosm_imagery::ESRI_WORLD_IMAGERY));
+                self.tile_manager.set_enabled(true);
+                self.status_message = "Imagery: Esri World Imagery (Satellite)".to_string();
+            }
+            "opentopomap" => {
+                self.tile_manager
+                    .set_source(Some(rosm_imagery::OPEN_TOPO_MAP));
+                self.tile_manager.set_enabled(true);
+                self.status_message = "Imagery: OpenTopoMap".to_string();
+            }
+            "hot_osm" => {
+                self.tile_manager.set_source(Some(rosm_imagery::HOT_OSM));
+                self.tile_manager.set_enabled(true);
+                self.status_message = "Imagery: Humanitarian OSM (HOT)".to_string();
+            }
+            "none" => {
+                self.tile_manager.set_source(None);
+                self.status_message = "Imagery: Off".to_string();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn set_imagery_opacity(&mut self, opacity: f32) {
+        self.tile_manager.set_opacity(opacity);
+        self.status_message = format!(
+            "Imagery opacity: {:.0}%",
+            self.tile_manager.opacity() * 100.0
+        );
+    }
+
+    pub fn toggle_imagery(&mut self) {
+        let new_val = !self.tile_manager.is_enabled();
+        self.tile_manager.set_enabled(new_val);
+        self.status_message = if new_val {
+            "Imagery: Enabled".to_string()
+        } else {
+            "Imagery: Disabled".to_string()
+        };
     }
 }
 
