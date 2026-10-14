@@ -306,14 +306,12 @@ fn parse_tag_attrs(e: &BytesStart) -> Result<(String, String), IoError> {
     for attr in e.attributes().flatten() {
         match attr.key.as_ref() {
             b"k" => {
-                if let Ok(s) = std::str::from_utf8(&attr.value) {
-                    k = Some(s.to_string());
-                }
+                let unescaped = attr.unescape_value()?;
+                k = Some(unescaped.to_string());
             }
             b"v" => {
-                if let Ok(s) = std::str::from_utf8(&attr.value) {
-                    v = Some(s.to_string());
-                }
+                let unescaped = attr.unescape_value()?;
+                v = Some(unescaped.to_string());
             }
             _ => {}
         }
