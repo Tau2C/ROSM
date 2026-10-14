@@ -55,7 +55,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_map_pointer_down(move |x, y, btn| {
+        ui.on_map_pointer_down(move |x, y, w, h, btn| {
             let button = match btn {
                 0 => MouseButton::Left,
                 1 => MouseButton::Right,
@@ -63,6 +63,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 _ => MouseButton::Other,
             };
             let mut s = state.borrow_mut();
+            if w > 10.0
+                && h > 10.0
+                && (s.viewport.width != w as u32 || s.viewport.height != h as u32)
+            {
+                s.viewport.resize(w as u32, h as u32);
+            }
             s.on_mouse_down(x, y, button);
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &s);
@@ -73,7 +79,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_map_pointer_up(move |x, y, btn| {
+        ui.on_map_pointer_up(move |x, y, w, h, btn| {
             let button = match btn {
                 0 => MouseButton::Left,
                 1 => MouseButton::Right,
@@ -81,6 +87,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 _ => MouseButton::Other,
             };
             let mut s = state.borrow_mut();
+            if w > 10.0
+                && h > 10.0
+                && (s.viewport.width != w as u32 || s.viewport.height != h as u32)
+            {
+                s.viewport.resize(w as u32, h as u32);
+            }
             s.on_mouse_up(x, y, button);
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &s);
@@ -91,11 +103,16 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_map_pointer_move(move |x, y| {
+        ui.on_map_pointer_move(move |x, y, w, h| {
             let mut s = state.borrow_mut();
+            if w > 10.0
+                && h > 10.0
+                && (s.viewport.width != w as u32 || s.viewport.height != h as u32)
+            {
+                s.viewport.resize(w as u32, h as u32);
+            }
             s.on_mouse_move(x, y);
             if let Some(ui) = ui_weak.upgrade() {
-                // If dragging or panning, redraw canvas; otherwise just update coordinates
                 if s.is_panning || s.dragged_node.is_some() || !s.drawing_nodes.is_empty() {
                     update_ui(&ui, &s);
                 } else if let Some(geo) = s.mouse_geo {
@@ -110,8 +127,14 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_map_scroll(move |x, y, delta_y| {
+        ui.on_map_scroll(move |x, y, w, h, delta_y| {
             let mut s = state.borrow_mut();
+            if w > 10.0
+                && h > 10.0
+                && (s.viewport.width != w as u32 || s.viewport.height != h as u32)
+            {
+                s.viewport.resize(w as u32, h as u32);
+            }
             s.on_scroll(x, y, delta_y);
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &s);
@@ -366,15 +389,40 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Synchronize viewport with window layout on first show
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let actual_w = ui.get_canvas_actual_width();
+                let actual_h = ui.get_canvas_actual_height();
+                let mut s = state.borrow_mut();
+                if actual_w > 10.0 && actual_h > 10.0 {
+                    s.viewport.resize(actual_w as u32, actual_h as u32);
+                    s.fit_extent();
+                }
+                update_ui(&ui, &s);
+            }
+        });
+    }
+
     ui.run()
 }
 
 /// Updates Slint UI properties from the current AppState.
 fn update_ui(ui: &MainWindow, state: &AppState) {
+    let mut vp = state.viewport.clone();
+    let actual_w = ui.get_canvas_actual_width();
+    let actual_h = ui.get_canvas_actual_height();
+    if actual_w > 10.0 && actual_h > 10.0 {
+        vp.resize(actual_w as u32, actual_h as u32);
+    }
+
     // 1. Render Map Canvas
     let buffer = render_map(
         &state.dataset,
-        &state.viewport,
+        &vp,
         state.selected_primitive,
         &state.drawing_nodes,
         state.mouse_geo,

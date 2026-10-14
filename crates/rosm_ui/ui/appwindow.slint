@@ -18,10 +18,10 @@ export component MainWindow inherits Window {
     background: #18191e;
 
     // Callbacks to Rust backend
-    callback map_pointer_down(float, float, int);
-    callback map_pointer_up(float, float, int);
-    callback map_pointer_move(float, float);
-    callback map_scroll(float, float, float);
+    callback map_pointer_down(float, float, float, float, int);
+    callback map_pointer_up(float, float, float, float, int);
+    callback map_pointer_move(float, float, float, float);
+    callback map_scroll(float, float, float, float, float);
     callback canvas_resized(float, float);
 
     callback action_open();
@@ -63,6 +63,9 @@ export component MainWindow inherits Window {
     in-out property <string> cursor_coords: "Lat: 0.000000°, Lon: 0.000000°";
     in-out property <string> stats_text: "Nodes: 0 | Ways: 0";
     in-out property <string> status_message: "Ready";
+
+    out property <length> canvas_actual_width: canvas_touch.width;
+    out property <length> canvas_actual_height: canvas_touch.height;
 
     VerticalLayout {
         padding: 0px;
@@ -208,7 +211,7 @@ export component MainWindow inherits Window {
                     image-fit: fill;
                 }
 
-                TouchArea {
+                canvas_touch := TouchArea {
                     width: 100%;
                     height: 100%;
 
@@ -217,23 +220,27 @@ export component MainWindow inherits Window {
                             root.map_pointer_down(
                                 self.mouse-x / 1px,
                                 self.mouse-y / 1px,
+                                self.width / 1px,
+                                self.height / 1px,
                                 event.button == PointerEventButton.left ? 0 : (event.button == PointerEventButton.right ? 1 : 2)
                             );
                         } else if (event.kind == PointerEventKind.up) {
                             root.map_pointer_up(
                                 self.mouse-x / 1px,
                                 self.mouse-y / 1px,
+                                self.width / 1px,
+                                self.height / 1px,
                                 event.button == PointerEventButton.left ? 0 : (event.button == PointerEventButton.right ? 1 : 2)
                             );
                         }
                     }
 
                     moved => {
-                        root.map_pointer_move(self.mouse-x / 1px, self.mouse-y / 1px);
+                        root.map_pointer_move(self.mouse-x / 1px, self.mouse-y / 1px, self.width / 1px, self.height / 1px);
                     }
 
                     scroll-event(event) => {
-                        root.map_scroll(self.mouse-x / 1px, self.mouse-y / 1px, event.delta-y / 1px);
+                        root.map_scroll(self.mouse-x / 1px, self.mouse-y / 1px, self.width / 1px, self.height / 1px, event.delta-y / 1px);
                         return accept;
                     }
                 }
