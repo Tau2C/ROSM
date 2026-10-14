@@ -3737,6 +3737,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rosm_net"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "quick-xml 0.37.5",
+ "ring",
+ "rosm_core",
+ "rosm_io",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "rosm_ui"
 version = "0.1.0"
 dependencies = [

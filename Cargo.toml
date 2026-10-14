@@ -4,6 +4,7 @@ members = [
     "crates/rosm_core",
     "crates/rosm_io",
     "crates/rosm_imagery",
+    "crates/rosm_net",
     "crates/rosm_ui",
 ]
 
@@ -23,3 +24,5 @@ slint-build = "1.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 ureq = { version = "2.10", default-features = false, features = ["tls", "native-certs"] }
 crossbeam-channel = "0.5"
+url = "2.5"
+base64 = "0.22"

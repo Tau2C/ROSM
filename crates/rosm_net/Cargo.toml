@@ -1,0 +1,21 @@
+[package]
+name = "rosm_net"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "OpenStreetMap API v0.6, OAuth 2.0 PKCE, and Overpass QL networking client for ROSM"
+
+[dependencies]
+rosm_core = { path = "../rosm_core" }
+rosm_io = { path = "../rosm_io" }
+ureq = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+ring = "0.17"
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+quick-xml = { workspace = true }
+
+[dev-dependencies]
