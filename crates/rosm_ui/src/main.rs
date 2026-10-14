@@ -149,11 +149,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui_weak.clone();
         ui.on_action_zoom_in(move || {
             let mut s = state.borrow_mut();
-            let (cx, cy) = (
-                s.viewport.width as f32 / 2.0,
-                s.viewport.height as f32 / 2.0,
-            );
-            s.viewport.zoom_at(1.3, cx, cy);
+            s.zoom_in();
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &mut s);
             }
@@ -165,11 +161,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui_weak.clone();
         ui.on_action_zoom_out(move || {
             let mut s = state.borrow_mut();
-            let (cx, cy) = (
-                s.viewport.width as f32 / 2.0,
-                s.viewport.height as f32 / 2.0,
-            );
-            s.viewport.zoom_at(1.0 / 1.3, cx, cy);
+            s.zoom_out();
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &mut s);
             }

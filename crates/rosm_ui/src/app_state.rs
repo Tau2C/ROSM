@@ -43,6 +43,7 @@ pub struct AppState {
     pub validation_issues: Vec<ValidationIssue>,
     pub status_message: String,
     pub tile_manager: rosm_imagery::TileManager,
+    pub current_mouse_pos: Option<(f32, f32)>,
 }
 
 impl Default for AppState {
@@ -62,6 +63,7 @@ impl Default for AppState {
             validation_issues: Vec::new(),
             status_message: "Ready".to_string(),
             tile_manager: rosm_imagery::TileManager::with_default_cache(),
+            current_mouse_pos: None,
         };
 
         state.load_sample_map();
@@ -330,6 +332,7 @@ impl AppState {
     pub fn on_mouse_move(&mut self, x: f32, y: f32) {
         let mouse_geo = self.viewport.screen_to_latlon(x, y);
         self.mouse_geo = Some(mouse_geo);
+        self.current_mouse_pos = Some((x, y));
 
         if self.is_panning {
             if let Some((last_x, last_y)) = self.last_mouse_pos {
@@ -348,6 +351,7 @@ impl AppState {
 
     pub fn on_mouse_up(&mut self, x: f32, y: f32, _button: MouseButton) {
         self.is_panning = false;
+        self.current_mouse_pos = Some((x, y));
 
         if let Some(dragged_id) = self.dragged_node.take() {
             let final_pos = self.viewport.screen_to_latlon(x, y);
@@ -359,8 +363,38 @@ impl AppState {
     }
 
     pub fn on_scroll(&mut self, x: f32, y: f32, delta_y: f32) {
+        self.current_mouse_pos = Some((x, y));
         let factor = if delta_y > 0.0 { 1.2 } else { 1.0 / 1.2 };
         self.viewport.zoom_at(factor, x, y);
+    }
+
+    /// Determines the anchor position for zooming (cursor position if over canvas, otherwise center).
+    pub fn current_mouse_anchor(&self) -> (f32, f32) {
+        if let Some((mx, my)) = self.current_mouse_pos {
+            if mx >= 0.0
+                && mx <= self.viewport.width as f32
+                && my >= 0.0
+                && my <= self.viewport.height as f32
+            {
+                return (mx, my);
+            }
+        }
+        (
+            self.viewport.width as f32 / 2.0,
+            self.viewport.height as f32 / 2.0,
+        )
+    }
+
+    /// Zooms in anchored around the current mouse position.
+    pub fn zoom_in(&mut self) {
+        let (cx, cy) = self.current_mouse_anchor();
+        self.viewport.zoom_at(1.3, cx, cy);
+    }
+
+    /// Zooms out anchored around the current mouse position.
+    pub fn zoom_out(&mut self) {
+        let (cx, cy) = self.current_mouse_anchor();
+        self.viewport.zoom_at(1.0 / 1.3, cx, cy);
     }
 
     /// Finishes the current way being drawn and records it in command history.
@@ -502,4 +536,51 @@ fn distance_to_segment(px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> 
     let proj_y = y1 + t * dy;
 
     ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zoom_in_anchors_at_mouse_position() {
+        let mut state = AppState::new();
+        state.viewport.resize(800, 600);
+        let cursor_x = 600.0;
+        let cursor_y = 200.0;
+
+        state.on_mouse_move(cursor_x, cursor_y);
+        let geo_under_cursor = state.viewport.screen_to_latlon(cursor_x, cursor_y);
+
+        state.zoom_in();
+
+        let (new_screen_x, new_screen_y) = state.viewport.latlon_to_screen(geo_under_cursor);
+        assert!((new_screen_x - cursor_x).abs() < 1e-2);
+        assert!((new_screen_y - cursor_y).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_on_scroll_anchors_at_mouse_position() {
+        let mut state = AppState::new();
+        state.viewport.resize(800, 600);
+        let cursor_x = 250.0;
+        let cursor_y = 450.0;
+
+        let geo_under_cursor = state.viewport.screen_to_latlon(cursor_x, cursor_y);
+        state.on_scroll(cursor_x, cursor_y, 1.0); // zoom in
+
+        let (new_screen_x, new_screen_y) = state.viewport.latlon_to_screen(geo_under_cursor);
+        assert!((new_screen_x - cursor_x).abs() < 1e-2);
+        assert!((new_screen_y - cursor_y).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_zoom_falls_back_to_center_when_mouse_outside() {
+        let mut state = AppState::new();
+        state.viewport.resize(800, 600);
+        state.current_mouse_pos = None;
+
+        let anchor = state.current_mouse_anchor();
+        assert_eq!(anchor, (400.0, 300.0));
+    }
 }

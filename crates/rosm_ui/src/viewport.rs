@@ -98,7 +98,7 @@ impl Viewport {
         let (new_screen_x, new_screen_y) = self.latlon_to_screen(anchor_geo);
         let dx = new_screen_x - anchor_x;
         let dy = new_screen_y - anchor_y;
-        self.pan(dx, dy);
+        self.pan(-dx, -dy);
     }
 
     /// Adjusts center and zoom to fit the entire bounding box inside the canvas.
@@ -157,6 +157,29 @@ mod tests {
         assert!(
             vp.center_lat < orig_lat,
             "panning down should move center south"
+        );
+    }
+
+    #[test]
+    fn test_zoom_at_anchor_invariance() {
+        let mut vp = Viewport::new(800, 600);
+        let anchor = (650.0, 150.0); // off-center mouse position
+        let geo_before = vp.screen_to_latlon(anchor.0, anchor.1);
+
+        vp.zoom_at(1.5, anchor.0, anchor.1);
+
+        let screen_after = vp.latlon_to_screen(geo_before);
+        assert!(
+            (screen_after.0 - anchor.0).abs() < 1e-2,
+            "X coordinate shifted: {} vs {}",
+            screen_after.0,
+            anchor.0
+        );
+        assert!(
+            (screen_after.1 - anchor.1).abs() < 1e-2,
+            "Y coordinate shifted: {} vs {}",
+            screen_after.1,
+            anchor.1
         );
     }
 }
