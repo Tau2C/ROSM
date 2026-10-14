@@ -11,7 +11,8 @@ pub use coord::{TileCoordinate, TILE_SIZE_PIXELS};
 pub use fetcher::{FetchError, TileFetchRequest, TileFetchResponse, TileFetcher};
 pub use manager::{ResolvedTile, TileManager};
 pub use source::{
-    ImagerySource, BUILTIN_SOURCES, ESRI_WORLD_IMAGERY, HOT_OSM, OPEN_TOPO_MAP, OSM_CARTO,
+    builtin_sources, esri_world_imagery, hot_osm, open_railway_map, open_sea_map, open_topo_map,
+    osm_carto, ImagerySource, SourceRegistry,
 };
 
 /// Converts pixels per degree of longitude into an integer Slippy map zoom level `[0, 19]`.

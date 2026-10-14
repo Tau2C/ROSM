@@ -31,6 +31,7 @@ pub fn render_map(
     drawing_nodes: &[NodeId],
     mouse_geo: Option<LatLon>,
     mut tile_manager: Option<&mut rosm_imagery::TileManager>,
+    layer_stack: Option<&crate::layers::LayerStack>,
 ) -> SharedPixelBuffer<Rgba8Pixel> {
     let w = viewport.width;
     let h = viewport.height;
@@ -42,30 +43,88 @@ pub fn render_map(
         chunk.copy_from_slice(&colors::BG);
     }
 
-    // 2. Render slippy map raster tiles if enabled
-    if let Some(ref mut mgr) = tile_manager {
-        if mgr.is_enabled() {
-            if let Some(source) = mgr.source().cloned() {
-                render_imagery_tiles(bytes, w, h, viewport, mgr, &source);
+    // 2. Render layers in stack order (index 0 = bottom, last = top)
+    if let Some(stack) = layer_stack {
+        for layer in stack.layers() {
+            if !layer.visible || layer.opacity <= 0.001 {
+                continue;
+            }
+            match &layer.kind {
+                crate::layers::LayerKind::Background { source_id }
+                | crate::layers::LayerKind::Overlay { source_id } => {
+                    if let Some(ref mut mgr) = tile_manager {
+                        if let Some(source) = mgr.registry().get(source_id).cloned() {
+                            render_imagery_tiles(
+                                bytes,
+                                w,
+                                h,
+                                viewport,
+                                mgr,
+                                &source,
+                                layer.opacity,
+                            );
+                        }
+                    }
+                }
+                crate::layers::LayerKind::Grid => {
+                    render_grid(bytes, w, h, viewport);
+                }
+                crate::layers::LayerKind::OsmData => {
+                    render_osm_data(
+                        bytes,
+                        viewport,
+                        dataset,
+                        selected_primitive,
+                        drawing_nodes,
+                        mouse_geo,
+                    );
+                }
             }
         }
+    } else {
+        if let Some(ref mut mgr) = tile_manager {
+            if mgr.is_enabled() {
+                if let Some(source) = mgr.source().cloned() {
+                    render_imagery_tiles(bytes, w, h, viewport, mgr, &source, mgr.opacity());
+                }
+            }
+        }
+        render_grid(bytes, w, h, viewport);
+        render_osm_data(
+            bytes,
+            viewport,
+            dataset,
+            selected_primitive,
+            drawing_nodes,
+            mouse_geo,
+        );
     }
 
-    // 3. Render subtle geographic grid
-    render_grid(bytes, w, h, viewport);
+    buffer
+}
 
-    // 3. Render all ways
+fn render_osm_data(
+    bytes: &mut [u8],
+    viewport: &Viewport,
+    dataset: &DataSet,
+    selected_primitive: Option<PrimitiveId>,
+    drawing_nodes: &[NodeId],
+    mouse_geo: Option<LatLon>,
+) {
+    let w = viewport.width;
+    let h = viewport.height;
+    // 1. Render all ways
     for way in dataset.ways() {
         let is_selected = selected_primitive == Some(PrimitiveId::Way(way.id));
         render_way(bytes, w, h, viewport, dataset, way, is_selected);
     }
 
-    // 4. Render active drawing in-progress
+    // 2. Render active drawing in-progress
     if !drawing_nodes.is_empty() {
         render_drawing_preview(bytes, w, h, viewport, dataset, drawing_nodes, mouse_geo);
     }
 
-    // 5. Render nodes
+    // 3. Render nodes
     for node in dataset.nodes() {
         let is_selected = selected_primitive == Some(PrimitiveId::Node(node.id));
         let (sx, sy) = viewport.latlon_to_screen(node.position);
@@ -102,8 +161,6 @@ pub fn render_map(
             }
         }
     }
-
-    buffer
 }
 
 fn render_grid(bytes: &mut [u8], w: u32, h: u32, vp: &Viewport) {
@@ -396,6 +453,7 @@ fn render_imagery_tiles(
     vp: &Viewport,
     mgr: &mut rosm_imagery::TileManager,
     source: &rosm_imagery::ImagerySource,
+    opacity: f32,
 ) {
     let zoom = rosm_imagery::zoom_level_from_pixels_per_deg(vp.zoom)
         .clamp(source.min_zoom, source.max_zoom);
@@ -410,8 +468,6 @@ fn render_imagery_tiles(
         &tiles[..]
     };
 
-    let opacity = mgr.opacity();
-
     for &tile in tiles_to_render {
         let bounds = tile.bounds();
         let nw = LatLon::new(bounds.max_lat, bounds.min_lon);
@@ -423,7 +479,7 @@ fn render_imagery_tiles(
         let rect = ScreenRect { x0, y0, x1, y1 };
         if let Some(resolved) = mgr.get_tile_or_ancestor(source, tile) {
             blit_tile(bytes, w, h, &resolved, tile, rect, opacity);
-        } else if mgr.is_pending(source.id, tile) {
+        } else if mgr.is_pending(&source.id, tile) {
             draw_tile_placeholder(bytes, w, h, rect);
         }
     }
@@ -545,10 +601,10 @@ mod tests {
     use super::*;
     use image::RgbaImage;
     use rosm_core::primitive::Node;
-    use rosm_imagery::{TileCache, TileCoordinate, TileManager, OSM_CARTO};
+    use rosm_imagery::{osm_carto, TileCache, TileCoordinate, TileManager};
 
     #[test]
-    fn test_render_map_with_imagery() {
+    fn test_render_map_with_imagery_and_layers() {
         let mut ds = DataSet::new();
         ds.insert_node(Node::new(1, LatLon::new(51.5074, -0.1278)));
 
@@ -561,12 +617,13 @@ mod tests {
         for p in test_img.pixels_mut() {
             *p = image::Rgba([100, 150, 200, 255]);
         }
-        cache.insert(OSM_CARTO.id, center_tile, &[], test_img);
+        let carto = osm_carto();
+        cache.insert(&carto.id, center_tile, &[], test_img);
 
         let mut mgr = TileManager::new(cache);
-        mgr.set_opacity(0.8);
+        let stack = crate::layers::LayerStack::standard_stack();
 
-        let buffer = render_map(&ds, &vp, None, &[], None, Some(&mut mgr));
+        let buffer = render_map(&ds, &vp, None, &[], None, Some(&mut mgr), Some(&stack));
         assert_eq!(buffer.width(), 400);
         assert_eq!(buffer.height(), 300);
     }

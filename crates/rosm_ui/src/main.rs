@@ -10,6 +10,7 @@ use rosm_core::validator::Severity;
 use slint::{Image, ModelRc, VecModel};
 
 mod app_state;
+mod layers;
 mod renderer;
 mod viewport;
 
@@ -381,14 +382,14 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // --- Imagery Callbacks ---
+    // --- Layer Stack Callbacks ---
 
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_set_imagery_source(move |src_id| {
+        ui.on_move_layer_up(move |idx| {
             let mut s = state.borrow_mut();
-            s.set_imagery_source(src_id.as_str());
+            s.move_layer_up(idx as usize);
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &mut s);
             }
@@ -398,9 +399,9 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_set_imagery_opacity(move |opacity| {
+        ui.on_move_layer_down(move |idx| {
             let mut s = state.borrow_mut();
-            s.set_imagery_opacity(opacity);
+            s.move_layer_down(idx as usize);
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &mut s);
             }
@@ -410,9 +411,88 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state = Rc::clone(&state);
         let ui_weak = ui_weak.clone();
-        ui.on_toggle_imagery(move || {
+        ui.on_toggle_layer_visibility(move |idx| {
             let mut s = state.borrow_mut();
-            s.toggle_imagery();
+            s.toggle_layer_visibility(idx as usize);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_set_layer_opacity(move |idx, opacity| {
+            let mut s = state.borrow_mut();
+            s.set_layer_opacity(idx as usize, opacity);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_set_layer_source(move |idx, src_id| {
+            let mut s = state.borrow_mut();
+            s.set_layer_source(idx as usize, src_id.as_str());
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_add_layer_from_source(move |src_id, is_overlay| {
+            let mut s = state.borrow_mut();
+            s.add_layer_from_source(src_id.as_str(), is_overlay);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_remove_layer(move |idx| {
+            let mut s = state.borrow_mut();
+            s.remove_layer(idx as usize);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_add_custom_source(move |id, name, url, min_z, max_z, is_overlay| {
+            let mut s = state.borrow_mut();
+            s.add_custom_source(
+                id.as_str(),
+                name.as_str(),
+                url.as_str(),
+                min_z as u8,
+                max_z as u8,
+                is_overlay,
+            );
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_remove_custom_source(move |id| {
+            let mut s = state.borrow_mut();
+            s.remove_custom_source(id.as_str());
             if let Some(ui) = ui_weak.upgrade() {
                 update_ui(&ui, &mut s);
             }
@@ -478,14 +558,29 @@ fn update_ui(ui: &MainWindow, state: &mut AppState) {
         &state.drawing_nodes,
         state.mouse_geo,
         Some(&mut state.tile_manager),
+        Some(&state.layer_stack),
     );
     ui.set_map_image(Image::from_rgba8(buffer));
 
-    // 2. Imagery Properties
-    ui.set_imagery_enabled(state.tile_manager.is_enabled());
-    ui.set_imagery_opacity(state.tile_manager.opacity());
-    let src_name = state.tile_manager.source().map(|s| s.name).unwrap_or("Off");
-    ui.set_imagery_source_name(src_name.into());
+    // 2. Layer Stack Properties
+    let layer_entries: Vec<LayerEntry> = state
+        .layer_stack
+        .layers()
+        .iter()
+        .enumerate()
+        .map(|(idx, l)| LayerEntry {
+            idx: idx as i32,
+            id: l.id.clone().into(),
+            name: l.name.clone().into(),
+            type_name: l.type_name().into(),
+            visible: l.visible,
+            opacity: l.opacity,
+            source_id: l.source_id().unwrap_or("").into(),
+            can_delete: !matches!(l.kind, crate::layers::LayerKind::OsmData),
+        })
+        .collect();
+    ui.set_layer_count(layer_entries.len() as i32);
+    ui.set_layers_list(ModelRc::new(VecModel::from(layer_entries)));
 
     // 3. Toolbar & Status
     ui.set_active_tool(match state.active_tool {

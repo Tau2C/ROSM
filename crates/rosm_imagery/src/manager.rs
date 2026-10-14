@@ -8,7 +8,7 @@ use image::RgbaImage;
 use crate::cache::TileCache;
 use crate::coord::TileCoordinate;
 use crate::fetcher::TileFetcher;
-use crate::source::{ImagerySource, OSM_CARTO};
+use crate::source::{osm_carto, ImagerySource, SourceRegistry};
 
 /// Result of looking up a tile, which may return the exact tile or an ancestor tile for fallback upscaling.
 #[derive(Clone)]
@@ -23,19 +23,26 @@ pub struct TileManager {
     cache: TileCache,
     fetcher: TileFetcher,
     pending: HashSet<(String, TileCoordinate)>,
+    registry: SourceRegistry,
     active_source: Option<ImagerySource>,
     opacity: f32,
     enabled: bool,
 }
 
 impl TileManager {
-    /// Creates a new `TileManager` using the provided cache.
+    /// Creates a new `TileManager` using the provided cache and default registry.
     pub fn new(cache: TileCache) -> Self {
+        let registry = SourceRegistry::new_with_builtins();
+        let default_source = registry
+            .get("osm_carto")
+            .cloned()
+            .or_else(|| Some(osm_carto()));
         Self {
             cache,
             fetcher: TileFetcher::new(),
             pending: HashSet::new(),
-            active_source: Some(OSM_CARTO),
+            registry,
+            active_source: default_source,
             opacity: 1.0,
             enabled: true,
         }
@@ -44,6 +51,16 @@ impl TileManager {
     /// Creates a new `TileManager` with default system disk cache and memory cache.
     pub fn with_default_cache() -> Self {
         Self::new(TileCache::new_with_default_dir())
+    }
+
+    /// Returns a reference to the dynamic source registry.
+    pub fn registry(&self) -> &SourceRegistry {
+        &self.registry
+    }
+
+    /// Returns a mutable reference to the dynamic source registry.
+    pub fn registry_mut(&mut self) -> &mut SourceRegistry {
+        &mut self.registry
     }
 
     /// Returns the currently active imagery source.
@@ -82,12 +99,12 @@ impl TileManager {
     pub fn update(&mut self) -> usize {
         let mut count = 0;
         while let Some(response) = self.fetcher.try_recv_response() {
-            let key = (response.source_id.to_string(), response.coord);
+            let key = (response.source_id.clone(), response.coord);
             self.pending.remove(&key);
 
             if let Ok((bytes, img)) = response.result {
                 self.cache
-                    .insert(response.source_id, response.coord, &bytes, img);
+                    .insert(&response.source_id, response.coord, &bytes, img);
                 count += 1;
             }
         }
@@ -100,11 +117,11 @@ impl TileManager {
         source: &ImagerySource,
         coord: TileCoordinate,
     ) -> Option<Arc<RgbaImage>> {
-        if let Some(cached) = self.cache.get(source.id, coord) {
+        if let Some(cached) = self.cache.get(&source.id, coord) {
             return Some(cached);
         }
 
-        let key = (source.id.to_string(), coord);
+        let key = (source.id.clone(), coord);
         if !self.pending.contains(&key) && self.fetcher.request_tile(source.clone(), coord) {
             self.pending.insert(key);
         }
@@ -131,7 +148,7 @@ impl TileManager {
         let mut current = coord;
         for _ in 0..3 {
             if let Some(parent) = current.parent() {
-                if let Some(img) = self.cache.get(source.id, parent) {
+                if let Some(img) = self.cache.get(&source.id, parent) {
                     return Some(ResolvedTile {
                         image: img,
                         actual_coord: parent,
@@ -156,7 +173,7 @@ impl TileManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::ESRI_WORLD_IMAGERY;
+    use crate::source::esri_world_imagery;
 
     #[test]
     fn test_manager_source_and_opacity() {
@@ -168,7 +185,8 @@ mod tests {
         mgr.set_opacity(0.65);
         assert!((mgr.opacity() - 0.65).abs() < 1e-4);
 
-        mgr.set_source(Some(ESRI_WORLD_IMAGERY));
+        let esri = esri_world_imagery();
+        mgr.set_source(Some(esri));
         assert_eq!(mgr.source().unwrap().id, "esri_world_imagery");
 
         mgr.set_enabled(false);
@@ -194,7 +212,8 @@ mod tests {
         cache.insert("osm_carto", parent, &[], parent_img);
 
         let mut mgr = TileManager::new(cache);
-        let resolved = mgr.get_tile_or_ancestor(&OSM_CARTO, child);
+        let carto = osm_carto();
+        let resolved = mgr.get_tile_or_ancestor(&carto, child);
         assert!(resolved.is_some());
         let tile = resolved.unwrap();
         assert!(!tile.is_exact);

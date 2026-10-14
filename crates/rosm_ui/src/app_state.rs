@@ -44,6 +44,7 @@ pub struct AppState {
     pub status_message: String,
     pub tile_manager: rosm_imagery::TileManager,
     pub current_mouse_pos: Option<(f32, f32)>,
+    pub layer_stack: crate::layers::LayerStack,
 }
 
 impl Default for AppState {
@@ -64,6 +65,7 @@ impl Default for AppState {
             status_message: "Ready".to_string(),
             tile_manager: rosm_imagery::TileManager::with_default_cache(),
             current_mouse_pos: None,
+            layer_stack: crate::layers::LayerStack::standard_stack(),
         };
 
         state.load_sample_map();
@@ -471,54 +473,143 @@ impl AppState {
         best.map(|(wid, _)| wid)
     }
 
-    pub fn set_imagery_source(&mut self, source_id: &str) {
-        match source_id {
-            "osm_carto" => {
-                self.tile_manager.set_source(Some(rosm_imagery::OSM_CARTO));
-                self.tile_manager.set_enabled(true);
-                self.status_message = "Imagery: OpenStreetMap Standard".to_string();
-            }
-            "esri_world_imagery" => {
-                self.tile_manager
-                    .set_source(Some(rosm_imagery::ESRI_WORLD_IMAGERY));
-                self.tile_manager.set_enabled(true);
-                self.status_message = "Imagery: Esri World Imagery (Satellite)".to_string();
-            }
-            "opentopomap" => {
-                self.tile_manager
-                    .set_source(Some(rosm_imagery::OPEN_TOPO_MAP));
-                self.tile_manager.set_enabled(true);
-                self.status_message = "Imagery: OpenTopoMap".to_string();
-            }
-            "hot_osm" => {
-                self.tile_manager.set_source(Some(rosm_imagery::HOT_OSM));
-                self.tile_manager.set_enabled(true);
-                self.status_message = "Imagery: Humanitarian OSM (HOT)".to_string();
-            }
-            "none" => {
-                self.tile_manager.set_source(None);
-                self.status_message = "Imagery: Off".to_string();
-            }
-            _ => {}
+    // --- Layer Operations ---
+
+    pub fn move_layer_up(&mut self, idx: usize) {
+        if self.layer_stack.move_up(idx) {
+            self.status_message = format!("Moved layer {} up in stack", idx + 1);
         }
     }
 
-    pub fn set_imagery_opacity(&mut self, opacity: f32) {
-        self.tile_manager.set_opacity(opacity);
-        self.status_message = format!(
-            "Imagery opacity: {:.0}%",
-            self.tile_manager.opacity() * 100.0
-        );
+    pub fn move_layer_down(&mut self, idx: usize) {
+        if self.layer_stack.move_down(idx) {
+            self.status_message = format!("Moved layer {} down in stack", idx + 1);
+        }
     }
 
-    pub fn toggle_imagery(&mut self) {
-        let new_val = !self.tile_manager.is_enabled();
-        self.tile_manager.set_enabled(new_val);
-        self.status_message = if new_val {
-            "Imagery: Enabled".to_string()
+    pub fn toggle_layer_visibility(&mut self, idx: usize) {
+        if self.layer_stack.toggle_visibility(idx) {
+            if let Some(l) = self.layer_stack.get(idx) {
+                self.status_message = format!(
+                    "Layer '{}' is now {}",
+                    l.name,
+                    if l.visible { "visible" } else { "hidden" }
+                );
+            }
+        }
+    }
+
+    pub fn set_layer_opacity(&mut self, idx: usize, opacity: f32) {
+        if self.layer_stack.set_opacity(idx, opacity) {
+            if let Some(l) = self.layer_stack.get(idx) {
+                self.status_message =
+                    format!("Layer '{}' opacity: {:.0}%", l.name, opacity * 100.0);
+            }
+        }
+    }
+
+    pub fn set_layer_source(&mut self, idx: usize, source_id: &str) {
+        if let Some(source) = self.tile_manager.registry().get(source_id).cloned() {
+            if self
+                .layer_stack
+                .set_source_id(idx, &source.id, &source.name)
+            {
+                self.status_message = format!("Layer source changed to {}", source.name);
+            }
+        }
+    }
+
+    pub fn add_layer_from_source(&mut self, source_id: &str, is_overlay: bool) {
+        if let Some(source) = self.tile_manager.registry().get(source_id).cloned() {
+            let id = format!("layer_{}_{}", source.id, self.layer_stack.len());
+            let layer = if is_overlay {
+                crate::layers::MapLayer::new_overlay(
+                    id,
+                    format!("{} (Overlay)", source.name),
+                    &source.id,
+                    0.7,
+                )
+            } else {
+                crate::layers::MapLayer::new_background(
+                    id,
+                    format!("Background: {}", source.name),
+                    &source.id,
+                )
+            };
+            self.layer_stack.add_layer(layer);
+            self.status_message = format!("Added layer '{}'", source.name);
+        }
+    }
+
+    pub fn remove_layer(&mut self, idx: usize) {
+        if let Some(removed) = self.layer_stack.remove_layer(idx) {
+            self.status_message = format!("Removed layer '{}'", removed.name);
         } else {
-            "Imagery: Disabled".to_string()
-        };
+            self.status_message = "Cannot delete the primary OSM data layer".to_string();
+        }
+    }
+
+    // --- Dynamic Source Operations ---
+
+    pub fn add_custom_source(
+        &mut self,
+        id: &str,
+        name: &str,
+        url_template: &str,
+        min_zoom: u8,
+        max_zoom: u8,
+        is_overlay: bool,
+    ) -> bool {
+        let source = rosm_imagery::ImagerySource::new(
+            id,
+            name,
+            url_template,
+            min_zoom,
+            max_zoom,
+            "Custom User Source",
+            is_overlay,
+        );
+        let ok = self.tile_manager.registry_mut().add(source);
+        if ok {
+            self.status_message = format!("Added imagery source '{name}'");
+        } else {
+            self.status_message = format!("Source ID '{id}' already exists");
+        }
+        ok
+    }
+
+    #[allow(dead_code)]
+    pub fn update_custom_source(
+        &mut self,
+        id: &str,
+        name: &str,
+        url_template: &str,
+        min_zoom: u8,
+        max_zoom: u8,
+        is_overlay: bool,
+    ) -> bool {
+        let source = rosm_imagery::ImagerySource::new(
+            id,
+            name,
+            url_template,
+            min_zoom,
+            max_zoom,
+            "Custom User Source",
+            is_overlay,
+        );
+        let ok = self.tile_manager.registry_mut().update(id, source);
+        if ok {
+            self.status_message = format!("Updated imagery source '{name}'");
+        }
+        ok
+    }
+
+    pub fn remove_custom_source(&mut self, id: &str) -> bool {
+        let ok = self.tile_manager.registry_mut().remove(id).is_some();
+        if ok {
+            self.status_message = format!("Removed imagery source '{id}'");
+        }
+        ok
     }
 }
 
@@ -582,5 +673,77 @@ mod tests {
 
         let anchor = state.current_mouse_anchor();
         assert_eq!(anchor, (400.0, 300.0));
+    }
+
+    #[test]
+    fn test_app_state_layer_operations() {
+        let mut state = AppState::new();
+        let initial_count = state.layer_stack.len();
+
+        // Add a layer from source
+        state.add_layer_from_source("osm_carto", false);
+        assert_eq!(state.layer_stack.len(), initial_count + 1);
+
+        // Move layer down
+        let new_idx = state.layer_stack.len() - 1;
+        state.move_layer_down(new_idx);
+
+        // Toggle layer visibility
+        state.toggle_layer_visibility(0);
+        assert!(!state.layer_stack.get(0).unwrap().visible);
+
+        // Set opacity
+        state.set_layer_opacity(0, 0.42);
+        assert!((state.layer_stack.get(0).unwrap().opacity - 0.42).abs() < 1e-4);
+
+        // Set layer source
+        state.set_layer_source(0, "esri_world_imagery");
+        assert_eq!(
+            state.layer_stack.get(0).unwrap().source_id(),
+            Some("esri_world_imagery")
+        );
+
+        // Remove layer
+        state.remove_layer(state.layer_stack.len() - 1);
+        assert_eq!(state.layer_stack.len(), initial_count);
+    }
+
+    #[test]
+    fn test_app_state_custom_sources() {
+        let mut state = AppState::new();
+
+        // Add custom source
+        assert!(state.add_custom_source(
+            "custom_ortho",
+            "Custom Orthophoto",
+            "https://ortho.example.com/{z}/{x}/{y}.png",
+            0,
+            20,
+            false
+        ));
+        assert!(state.tile_manager.registry().get("custom_ortho").is_some());
+
+        // Update custom source
+        assert!(state.update_custom_source(
+            "custom_ortho",
+            "Custom Orthophoto v2",
+            "https://ortho2.example.com/{z}/{x}/{y}.png",
+            1,
+            21,
+            false
+        ));
+        assert_eq!(
+            state
+                .tile_manager
+                .registry()
+                .get("custom_ortho")
+                .unwrap()
+                .name,
+            "Custom Orthophoto v2"
+        );
+
+        // Remove custom source
+        assert!(state.remove_custom_source("custom_ortho"));
+        assert!(state.tile_manager.registry().get("custom_ortho").is_none());
     }
 }

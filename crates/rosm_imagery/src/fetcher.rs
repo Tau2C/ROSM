@@ -39,7 +39,7 @@ pub struct TileFetchRequest {
 
 /// A completed tile fetch result.
 pub struct TileFetchResponse {
-    pub source_id: &'static str,
+    pub source_id: String,
     pub coord: TileCoordinate,
     pub result: Result<(Vec<u8>, RgbaImage), FetchError>,
 }
@@ -95,7 +95,7 @@ impl TileFetcher {
                             download_and_decode_tile(&agent, &request.source, request.coord);
 
                         let response = TileFetchResponse {
-                            source_id: request.source.id,
+                            source_id: request.source.id.clone(),
                             coord: request.coord,
                             result,
                         };
@@ -153,7 +153,7 @@ fn download_and_decode_tile(
     source: &ImagerySource,
     coord: TileCoordinate,
 ) -> Result<(Vec<u8>, RgbaImage), FetchError> {
-    let url = coord.format_url(source.url_template);
+    let url = coord.format_url(&source.url_template);
 
     let response = match agent.get(&url).call() {
         Ok(res) => res,

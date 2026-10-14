@@ -11,6 +11,17 @@ export struct IssueEntry {
     severity: string,
 }
 
+export struct LayerEntry {
+    idx: int,
+    id: string,
+    name: string,
+    type_name: string,
+    visible: bool,
+    opacity: float,
+    source_id: string,
+    can_delete: bool,
+}
+
 export component MainWindow inherits Window {
     title: "ROSM - Rust OpenStreetMap Editor";
     min-width: 1024px;
@@ -44,9 +55,16 @@ export component MainWindow inherits Window {
     callback remove_tag(string);
     callback select_issue(int);
 
-    callback set_imagery_source(string);
-    callback set_imagery_opacity(float);
-    callback toggle_imagery();
+    // Layer stack & dynamic source callbacks
+    callback move_layer_up(int);
+    callback move_layer_down(int);
+    callback toggle_layer_visibility(int);
+    callback set_layer_opacity(int, float);
+    callback set_layer_source(int, string);
+    callback add_layer_from_source(string, bool);
+    callback remove_layer(int);
+    callback add_custom_source(string, string, string, int, int, bool);
+    callback remove_custom_source(string);
 
     // Properties populated from Rust
     in-out property <image> map_image;
@@ -56,9 +74,8 @@ export component MainWindow inherits Window {
     in-out property <bool> can_redo: false;
     in-out property <bool> is_dirty: false;
 
-    in-out property <bool> imagery_enabled: true;
-    in-out property <string> imagery_source_name: "OpenStreetMap Standard";
-    in-out property <float> imagery_opacity: 1.0;
+    in-out property <[LayerEntry]> layers_list: [];
+    in-out property <int> layer_count: 0;
 
     in-out property <bool> has_selection: false;
     in-out property <string> selection_title: "No Selection";
@@ -200,10 +217,12 @@ export component MainWindow inherits Window {
 
                 Rectangle { width: 1px; background: #333846; }
 
-                // Imagery Layer Quick Toggle
-                Button {
-                    text: root.imagery_enabled ? ("Imagery: " + root.imagery_source_name) : "Imagery: Off";
-                    clicked => { root.toggle_imagery(); }
+                // Layers Count
+                Text {
+                    text: root.layer_count + " Layers";
+                    font-size: 11px;
+                    color: #94a3b8;
+                    vertical-alignment: center;
                 }
             }
         }
@@ -291,63 +310,137 @@ export component MainWindow inherits Window {
                     padding: 12px;
                     spacing: 12px;
 
-                    // Imagery Layer Panel (JOSM style)
+                    // --- Layers Stack Panel (JOSM style) ---
                     VerticalLayout {
                         spacing: 6px;
                         HorizontalLayout {
                             Text {
-                                text: "Imagery Layer";
+                                text: "Layers Stack";
                                 font-size: 13px;
                                 font-weight: 700;
                                 color: #f1f5f9;
                                 vertical-alignment: center;
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            Button {
-                                text: root.imagery_enabled ? "Visible" : "Hidden";
-                                clicked => { root.toggle_imagery(); }
-                            }
-                        }
-
-                        HorizontalLayout {
-                            spacing: 4px;
-                            Button {
-                                text: "OSM";
-                                clicked => { root.set_imagery_source("osm_carto"); }
-                            }
-                            Button {
-                                text: "Aerial";
-                                clicked => { root.set_imagery_source("esri_world_imagery"); }
-                            }
-                            Button {
-                                text: "Topo";
-                                clicked => { root.set_imagery_source("opentopomap"); }
-                            }
-                            Button {
-                                text: "HOT";
-                                clicked => { root.set_imagery_source("hot_osm"); }
-                            }
-                        }
-
-                        HorizontalLayout {
-                            spacing: 4px;
                             Text {
-                                text: "Opacity:";
+                                text: root.layer_count + " layers";
                                 font-size: 11px;
                                 color: #94a3b8;
                                 vertical-alignment: center;
                             }
+                        }
+
+                        // Layer items list
+                        ScrollView {
+                            height: 140px;
+                            VerticalLayout {
+                                spacing: 4px;
+                                for layer in root.layers_list : Rectangle {
+                                    height: 38px;
+                                    background: layer.visible ? #242731 : #191b22;
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: layer.visible ? #333846 : #20222a;
+
+                                    HorizontalLayout {
+                                        padding-left: 6px;
+                                        padding-right: 6px;
+                                        spacing: 4px;
+
+                                        // Visibility toggle button
+                                        Button {
+                                            text: layer.visible ? "👁" : "Ø";
+                                            width: 26px;
+                                            clicked => { root.toggle_layer_visibility(layer.idx); }
+                                        }
+
+                                        // Layer name & type
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 1px;
+                                            Text {
+                                                text: layer.name;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: layer.visible ? #e2e8f0 : #64748b;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: layer.type_name + " · " + Math.round(layer.opacity * 100) + "%";
+                                                font-size: 9px;
+                                                color: #94a3b8;
+                                            }
+                                        }
+
+                                        // Order buttons
+                                        Button {
+                                            text: "▲";
+                                            width: 24px;
+                                            clicked => { root.move_layer_up(layer.idx); }
+                                        }
+                                        Button {
+                                            text: "▼";
+                                            width: 24px;
+                                            clicked => { root.move_layer_down(layer.idx); }
+                                        }
+
+                                        // Delete button (if can_delete)
+                                        if layer.can_delete : Button {
+                                            text: "✕";
+                                            width: 24px;
+                                            clicked => { root.remove_layer(layer.idx); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Quick Add Layer Buttons
+                        HorizontalLayout {
+                            spacing: 4px;
                             Button {
-                                text: "30%";
-                                clicked => { root.set_imagery_opacity(0.3); }
+                                text: "+ Base: OSM";
+                                clicked => { root.add_layer_from_source("osm_carto", false); }
                             }
                             Button {
-                                text: "60%";
-                                clicked => { root.set_imagery_opacity(0.6); }
+                                text: "+ Base: Aerial";
+                                clicked => { root.add_layer_from_source("esri_world_imagery", false); }
                             }
                             Button {
-                                text: "100%";
-                                clicked => { root.set_imagery_opacity(1.0); }
+                                text: "+ Overlay: Rail";
+                                clicked => { root.add_layer_from_source("openrailwaymap", true); }
+                            }
+                        }
+
+                        // Custom Source Input Row
+                        HorizontalLayout {
+                            spacing: 4px;
+                            src_name_input := LineEdit {
+                                placeholder-text: "Source Name";
+                                horizontal-stretch: 1;
+                            }
+                            src_url_input := LineEdit {
+                                placeholder-text: "URL: https://.../{z}/{x}/{y}.png";
+                                horizontal-stretch: 2;
+                            }
+                            Button {
+                                text: "+ Add";
+                                width: 50px;
+                                clicked => {
+                                    if (src_name_input.text != "" && src_url_input.text != "") {
+                                        root.add_custom_source(
+                                            src_name_input.text,
+                                            src_name_input.text,
+                                            src_url_input.text,
+                                            0,
+                                            20,
+                                            false
+                                        );
+                                        src_name_input.text = "";
+                                        src_url_input.text = "";
+                                    }
+                                }
                             }
                         }
                     }
