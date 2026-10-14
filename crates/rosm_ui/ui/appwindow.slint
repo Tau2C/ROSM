@@ -66,6 +66,13 @@ export component MainWindow inherits Window {
     callback add_custom_source(string, string, string, int, int, bool);
     callback remove_custom_source(string);
 
+    // OSM Network & Changeset callbacks
+    callback action_download_bbox();
+    callback action_upload_changeset(string, string);
+    callback action_execute_overpass(string);
+    callback action_set_auth_token(string);
+    callback action_set_osm_environment(bool);
+
     // Properties populated from Rust
     in-out property <image> map_image;
     in-out property <int> active_tool: 0; // 0 = Select, 1 = DrawWay
@@ -73,6 +80,15 @@ export component MainWindow inherits Window {
     in-out property <bool> can_undo: false;
     in-out property <bool> can_redo: false;
     in-out property <bool> is_dirty: false;
+
+    // Network & Changeset properties
+    in-out property <bool> is_logged_in: false;
+    in-out property <bool> is_production_server: false;
+    in-out property <int> pending_created: 0;
+    in-out property <int> pending_modified: 0;
+    in-out property <int> pending_deleted: 0;
+    in-out property <int> pending_total: 0;
+    in-out property <bool> show_network_panel: false;
 
     in-out property <[LayerEntry]> layers_list: [];
     in-out property <int> layer_count: 0;
@@ -217,12 +233,119 @@ export component MainWindow inherits Window {
 
                 Rectangle { width: 1px; background: #333846; }
 
+                // OSM Network
+                Button {
+                    text: "⬇ Download BBox";
+                    clicked => { root.action_download_bbox(); }
+                }
+
+                Button {
+                    text: "🌐 OSM Network" + (root.pending_total > 0 ? (" (Diff: " + root.pending_total + ")") : "");
+                    clicked => { root.show_network_panel = !root.show_network_panel; }
+                }
+
+                Rectangle { width: 1px; background: #333846; }
+
                 // Layers Count
                 Text {
                     text: root.layer_count + " Layers";
                     font-size: 11px;
                     color: #94a3b8;
                     vertical-alignment: center;
+                }
+            }
+        }
+
+        // --- OSM Network & Changeset Expandable Panel ---
+        if root.show_network_panel : Rectangle {
+            background: #1e212b;
+            border-width: 1px;
+            border-color: #333846;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                // Server & Auth Row
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        text: root.is_production_server ? "Server: [Production OSM]" : "Server: [Dev Sandbox]";
+                        clicked => { root.action_set_osm_environment(!root.is_production_server); }
+                    }
+
+                    auth_input := LineEdit {
+                        placeholder-text: "OAuth 2.0 Bearer Token";
+                        horizontal-stretch: 1;
+                    }
+
+                    Button {
+                        text: root.is_logged_in ? "Update Token" : "Set Token";
+                        clicked => {
+                            root.action_set_auth_token(auth_input.text);
+                        }
+                    }
+
+                    Text {
+                        text: root.is_logged_in ? "✓ Authenticated" : "⚠ Not Authenticated";
+                        font-size: 11px;
+                        color: root.is_logged_in ? #34d399 : #f59e0b;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Changeset Upload Row
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: "Changes: +" + root.pending_created + " ~" + root.pending_modified + " -" + root.pending_deleted;
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: root.pending_total > 0 ? #38bdf8 : #94a3b8;
+                        vertical-alignment: center;
+                    }
+
+                    cs_comment := LineEdit {
+                        placeholder-text: "Changeset Comment (Required to upload)";
+                        text: "Updated features in ROSM";
+                        horizontal-stretch: 2;
+                    }
+
+                    cs_source := LineEdit {
+                        placeholder-text: "Source (e.g. survey, Bing)";
+                        text: "survey, imagery";
+                        horizontal-stretch: 1;
+                    }
+
+                    Button {
+                        text: "⬆ Upload Changeset";
+                        enabled: root.pending_total > 0 && cs_comment.text != "";
+                        clicked => {
+                            root.action_upload_changeset(cs_comment.text, cs_source.text);
+                        }
+                    }
+                }
+
+                // Overpass QL Query Row
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    overpass_input := LineEdit {
+                        placeholder-text: "Overpass QL e.g. [out:xml]; way[\"highway\"]({{bbox}}); out geom;";
+                        text: "[out:xml][timeout:25]; ( way[\"highway\"]({{bbox}}); ); out meta; >; out meta qt;";
+                        horizontal-stretch: 1;
+                    }
+
+                    Button {
+                        text: "Run Overpass";
+                        clicked => {
+                            if (overpass_input.text != "") {
+                                root.action_execute_overpass(overpass_input.text);
+                            }
+                        }
+                    }
                 }
             }
         }

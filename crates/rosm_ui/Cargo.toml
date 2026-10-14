@@ -13,6 +13,7 @@ path = "src/main.rs"
 rosm_core = { path = "../rosm_core" }
 rosm_io = { path = "../rosm_io" }
 rosm_imagery = { path = "../rosm_imagery" }
+rosm_net = { path = "../rosm_net" }
 image = { workspace = true }
 slint = { workspace = true }
 

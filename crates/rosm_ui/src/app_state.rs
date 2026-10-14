@@ -46,6 +46,14 @@ pub struct AppState {
     pub tile_manager: rosm_imagery::TileManager,
     pub current_mouse_pos: Option<(f32, f32)>,
     pub layer_stack: crate::layers::LayerStack,
+    pub osm_client: rosm_net::OsmClient,
+    pub overpass_client: rosm_net::OverpassClient,
+    pub base_dataset: DataSet,
+    pub osm_auth_token: Option<String>,
+    pub is_production_server: bool,
+    pub pending_created: usize,
+    pub pending_modified: usize,
+    pub pending_deleted: usize,
 }
 
 impl Default for AppState {
@@ -68,6 +76,14 @@ impl Default for AppState {
             tile_manager: rosm_imagery::TileManager::with_default_cache(),
             current_mouse_pos: None,
             layer_stack: crate::layers::LayerStack::standard_stack(),
+            osm_client: rosm_net::OsmClient::new(rosm_net::OsmEnvironment::Dev),
+            overpass_client: rosm_net::OverpassClient::default(),
+            base_dataset: DataSet::new(),
+            osm_auth_token: None,
+            is_production_server: false,
+            pending_created: 0,
+            pending_modified: 0,
+            pending_deleted: 0,
         };
 
         state.load_sample_map();
@@ -139,9 +155,11 @@ impl AppState {
         cafe.tags.insert("name", "The London Roaster");
         ds.insert_node(cafe);
 
-        self.dataset = ds;
+        self.dataset = ds.clone();
+        self.base_dataset = ds;
         self.command_stack = CommandStack::new();
         self.fit_extent();
+        self.update_diff_counts();
         self.status_message = "Loaded sample map".to_string();
     }
 
@@ -159,13 +177,15 @@ impl AppState {
         let reader = BufReader::new(file);
         let dataset = read_osm_xml(reader).map_err(|e| format!("XML parse error: {e}"))?;
 
-        self.dataset = dataset;
+        self.dataset = dataset.clone();
+        self.base_dataset = dataset;
         self.command_stack = CommandStack::new();
         self.selected_primitive = None;
         self.drawing_nodes.clear();
         self.file_path = Some(p.to_path_buf());
         self.fit_extent();
         self.run_validator();
+        self.update_diff_counts();
         self.status_message = format!(
             "Loaded {}",
             p.file_name().unwrap_or_default().to_string_lossy()
@@ -648,6 +668,156 @@ impl AppState {
         }
         ok
     }
+
+    // --- OSM Network & Changeset Operations ---
+
+    /// Recomputes pending change statistics comparing base_dataset to dataset.
+    pub fn update_diff_counts(&mut self) {
+        let diff = rosm_net::OsmDiff::compute(&self.base_dataset, &self.dataset);
+        self.pending_created =
+            diff.created_nodes.len() + diff.created_ways.len() + diff.created_relations.len();
+        self.pending_modified =
+            diff.modified_nodes.len() + diff.modified_ways.len() + diff.modified_relations.len();
+        self.pending_deleted =
+            diff.deleted_nodes.len() + diff.deleted_ways.len() + diff.deleted_relations.len();
+    }
+
+    /// Sets or clears the OAuth Bearer token for OSM API v0.6 authentication.
+    pub fn set_auth_token(&mut self, token: &str) {
+        let t = token.trim().to_string();
+        if t.is_empty() {
+            self.osm_auth_token = None;
+            self.osm_client = rosm_net::OsmClient::new(self.osm_client.environment().clone());
+            self.status_message = "Logged out from OSM API".into();
+        } else {
+            self.osm_auth_token = Some(t.clone());
+            self.osm_client =
+                rosm_net::OsmClient::new(self.osm_client.environment().clone()).with_auth(t);
+            self.status_message = "Configured OSM API access token".into();
+        }
+    }
+
+    /// Switches between production OSM server and development sandbox server.
+    pub fn set_osm_environment(&mut self, is_production: bool) {
+        self.is_production_server = is_production;
+        let env = if is_production {
+            rosm_net::OsmEnvironment::Production
+        } else {
+            rosm_net::OsmEnvironment::Dev
+        };
+        let mut client = rosm_net::OsmClient::new(env);
+        if let Some(ref token) = self.osm_auth_token {
+            client = client.with_auth(token.clone());
+        }
+        self.osm_client = client;
+        self.status_message = format!(
+            "OSM API server set to {}",
+            if is_production {
+                "Production"
+            } else {
+                "Dev Sandbox"
+            }
+        );
+    }
+
+    /// Downloads all vector primitives inside the current visible map viewport bounding box.
+    pub fn download_current_bbox(&mut self) -> Result<usize, String> {
+        let bbox = self.viewport.visible_bbox();
+        match self.osm_client.download_bbox(&bbox) {
+            Ok(ds) => {
+                let node_count = ds.node_count();
+                let way_count = ds.way_count();
+                self.base_dataset = ds.clone();
+                self.dataset = ds;
+                self.command_stack = CommandStack::new();
+                self.selected_primitive = None;
+                self.drawing_nodes.clear();
+                self.update_diff_counts();
+                self.run_validator();
+                self.status_message =
+                    format!("Downloaded {node_count} nodes, {way_count} ways from OSM API");
+                Ok(node_count + way_count)
+            }
+            Err(e) => {
+                let msg = format!("Download failed: {e}");
+                self.status_message = msg.clone();
+                Err(msg)
+            }
+        }
+    }
+
+    /// Queries the Overpass API with custom QL and loads the result into the dataset.
+    pub fn execute_overpass_query(&mut self, ql: &str) -> Result<usize, String> {
+        match self.overpass_client.query(ql) {
+            Ok(ds) => {
+                let node_count = ds.node_count();
+                let way_count = ds.way_count();
+                self.base_dataset = ds.clone();
+                self.dataset = ds;
+                self.command_stack = CommandStack::new();
+                self.selected_primitive = None;
+                self.drawing_nodes.clear();
+                self.fit_extent();
+                self.update_diff_counts();
+                self.run_validator();
+                self.status_message =
+                    format!("Overpass query returned {node_count} nodes, {way_count} ways");
+                Ok(node_count + way_count)
+            }
+            Err(e) => {
+                let msg = format!("Overpass query failed: {e}");
+                self.status_message = msg.clone();
+                Err(msg)
+            }
+        }
+    }
+
+    /// Uploads all pending creations, modifications, and deletions as an OSM changeset.
+    pub fn upload_changeset(&mut self, comment: &str, source: Option<&str>) -> Result<i64, String> {
+        let diff = rosm_net::OsmDiff::compute(&self.base_dataset, &self.dataset);
+        if diff.is_empty() {
+            let msg = "No pending changes to upload".to_string();
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let mut config = rosm_net::ChangesetConfig::new(comment);
+        if let Some(src) = source {
+            if !src.trim().is_empty() {
+                config = config.with_source(src);
+            }
+        }
+
+        let changeset_id = self
+            .osm_client
+            .create_changeset(&config)
+            .map_err(|e| format!("Failed to create changeset: {e}"))?;
+
+        let osc_xml = diff.to_osm_change_xml(changeset_id);
+
+        let diff_result = match self.osm_client.upload_diff(changeset_id, &osc_xml) {
+            Ok(dr) => dr,
+            Err(e) => {
+                let _ = self.osm_client.close_changeset(changeset_id);
+                let msg = format!("Failed to upload diff: {e}");
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        // Remap negative IDs in local dataset to server IDs
+        diff_result.apply_to_dataset(&mut self.dataset);
+
+        // Close the changeset
+        let _ = self.osm_client.close_changeset(changeset_id);
+
+        // Update baseline dataset to match
+        self.base_dataset = self.dataset.clone();
+        self.update_diff_counts();
+        self.command_stack.mark_saved();
+        self.status_message = format!("Successfully uploaded Changeset #{changeset_id}");
+        Ok(changeset_id)
+    }
 }
 
 fn distance_to_segment(px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
@@ -863,5 +1033,68 @@ mod tests {
         assert!(state.undo().is_ok());
         let reverted_pos = state.dataset.get_node(test_nid).unwrap().position;
         assert_eq!(reverted_pos, initial_pos);
+    }
+
+    #[test]
+    fn test_diff_counts_on_edits() {
+        let mut state = AppState::new();
+        state.update_diff_counts();
+        assert_eq!(state.pending_created, 0);
+        assert_eq!(state.pending_modified, 0);
+        assert_eq!(state.pending_deleted, 0);
+
+        // Add a new node (local negative ID)
+        let nid = state.dataset.allocate_node_id();
+        state
+            .dataset
+            .insert_node(Node::new(nid, LatLon::new(51.5, -0.1)));
+        state.update_diff_counts();
+        assert_eq!(state.pending_created, 1);
+
+        // Modify an existing positive node
+        let first_node = state.dataset.nodes().find(|n| !n.id.is_new()).map(|n| n.id);
+        if let Some(nid) = first_node {
+            if let Some(node) = state.dataset.get_node_mut(nid) {
+                node.tags.insert("tested", "yes");
+            }
+            state.update_diff_counts();
+            assert_eq!(state.pending_modified, 1);
+        }
+    }
+
+    #[test]
+    fn test_network_environment_and_auth() {
+        let mut state = AppState::new();
+        assert!(!state.is_production_server);
+        assert!(state.osm_auth_token.is_none());
+
+        state.set_auth_token("test_bearer_token_123");
+        assert_eq!(
+            state.osm_auth_token,
+            Some("test_bearer_token_123".to_string())
+        );
+        assert!(state.osm_client.is_authenticated());
+
+        state.set_osm_environment(true);
+        assert!(state.is_production_server);
+        assert_eq!(
+            state.osm_client.environment().base_url(),
+            "https://api.openstreetmap.org/api/0.6/"
+        );
+        // Auth token should persist across environment switch
+        assert!(state.osm_client.is_authenticated());
+
+        state.set_auth_token("");
+        assert!(state.osm_auth_token.is_none());
+        assert!(!state.osm_client.is_authenticated());
+    }
+
+    #[test]
+    fn test_upload_changeset_without_changes_fails() {
+        let mut state = AppState::new();
+        state.set_auth_token("mock_token");
+        let result = state.upload_changeset("No changes", None);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "No pending changes to upload");
     }
 }

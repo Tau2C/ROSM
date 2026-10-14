@@ -3760,6 +3760,7 @@ dependencies = [
  "rosm_core",
  "rosm_imagery",
  "rosm_io",
+ "rosm_net",
  "slint",
  "slint-build",
 ]

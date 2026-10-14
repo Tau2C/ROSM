@@ -499,6 +499,81 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // --- OSM Network & Changeset Callbacks ---
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_action_download_bbox(move || {
+            let mut s = state.borrow_mut();
+            let _ = s.download_current_bbox();
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_action_upload_changeset(move |comment, source| {
+            let mut s = state.borrow_mut();
+            let src_opt = if source.is_empty() {
+                None
+            } else {
+                Some(source.as_str())
+            };
+            let _ = s.upload_changeset(comment.as_str(), src_opt);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_action_execute_overpass(move |ql| {
+            let mut s = state.borrow_mut();
+            let bbox = s.viewport.visible_bbox();
+            let effective_ql = ql.replace(
+                "{{bbox}}",
+                &format!(
+                    "{:.6},{:.6},{:.6},{:.6}",
+                    bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon
+                ),
+            );
+            let _ = s.execute_overpass_query(&effective_ql);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_action_set_auth_token(move |token| {
+            let mut s = state.borrow_mut();
+            s.set_auth_token(token.as_str());
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_action_set_osm_environment(move |is_prod| {
+            let mut s = state.borrow_mut();
+            s.set_osm_environment(is_prod);
+            if let Some(ui) = ui_weak.upgrade() {
+                update_ui(&ui, &mut s);
+            }
+        });
+    }
+
     // Synchronize viewport with window layout on first show
     {
         let state = Rc::clone(&state);
@@ -582,7 +657,18 @@ fn update_ui(ui: &MainWindow, state: &mut AppState) {
     ui.set_layer_count(layer_entries.len() as i32);
     ui.set_layers_list(ModelRc::new(VecModel::from(layer_entries)));
 
-    // 3. Toolbar & Status
+    // 3. Network & Changeset Status
+    state.update_diff_counts();
+    ui.set_pending_created(state.pending_created as i32);
+    ui.set_pending_modified(state.pending_modified as i32);
+    ui.set_pending_deleted(state.pending_deleted as i32);
+    ui.set_pending_total(
+        (state.pending_created + state.pending_modified + state.pending_deleted) as i32,
+    );
+    ui.set_is_logged_in(state.osm_auth_token.is_some());
+    ui.set_is_production_server(state.is_production_server);
+
+    // 4. Toolbar & Status
     ui.set_active_tool(match state.active_tool {
         ToolMode::Select => 0,
         ToolMode::DrawWay => 1,
