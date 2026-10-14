@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/rosm_core",
     "crates/rosm_io",
+    "crates/rosm_ui",
 ]
 
 [workspace.package]
@@ -16,3 +17,5 @@ repository = "https://github.com/tau2c/ROSM"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 quick-xml = "0.37"
+slint = "1.9"
+slint-build = "1.9"
